@@ -42,9 +42,10 @@ to both `dx` and `dy`.
 ## Teensy To PC
 
 All lines are whitespace-separated `key=value` records. `EVENT` and `BUTTON_RAW`
-button rows are emitted immediately. `MOUSE` rows are aggregated and rate-limited
-to reduce USB Serial backlog; `mouse_reports` tells how many original mouse
-reports are included in the row.
+button rows are emitted immediately. `MOUSE` rows are disabled by default to
+avoid delaying button events behind mouse telemetry. If `SERIAL_MOUSE_TELEMETRY`
+is enabled in the sketch, `MOUSE` rows are aggregated and rate-limited;
+`mouse_reports` tells how many original mouse reports are included in the row.
 
 ```text
 READY firmware=teensy_serial_cpi protocol=1 left_pin=15 right_pin=17
