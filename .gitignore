@@ -1,0 +1,14 @@
+# Arduino / Teensy local build outputs
+build/
+*.hex
+*.elf
+*.eep
+*.lst
+*.sym
+*.map
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
