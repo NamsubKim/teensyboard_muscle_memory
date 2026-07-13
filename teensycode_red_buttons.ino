@@ -35,7 +35,7 @@ const uint8_t BINARY_MAGIC_0 = 0xA5;
 const uint8_t BINARY_MAGIC_1 = 0x5A;
 const uint8_t BINARY_PROTOCOL_VERSION = 1;
 const uint8_t BINARY_PACKET_MOUSE = 1;
-const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 54;
+const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 58;
 
 const uint16_t BOARD_BUTTON_LEFT = 0x0001;
 const uint16_t BOARD_BUTTON_RIGHT = 0x0002;
@@ -328,8 +328,10 @@ void sendBinaryMouseTelemetry(long dx, long dy, long out_x, long out_y,
   packet[index++] = BINARY_PACKET_MOUSE;
   packet[index++] = BINARY_MOUSE_PAYLOAD_LEN;
 
+  uint32_t nowUs = micros();
   putU32(packet, index, telemetryCounter++);
-  putU32(packet, index, millis());
+  putU32(packet, index, nowUs / 1000UL);
+  putU32(packet, index, nowUs);
   putU16(packet, index, trialIndex);
   putU16(packet, index, mouseReports);
   putI32(packet, index, (int32_t)dx);

@@ -61,7 +61,7 @@ Mouse telemetry is sent as compact binary packets by default:
 magic:       0xA5 0x5A
 version:     u8, currently 1
 type:        u8, 1 = mouse telemetry
-payload_len: u8, currently 54
+payload_len: u8, currently 58
 payload:     little-endian fixed layout below
 checksum:    u8, sum(version..payload) & 0xFF
 ```
@@ -71,7 +71,8 @@ Mouse payload layout:
 | Field | Type | Meaning |
 |---|---|---|
 | `counter` | `u32` | Firmware telemetry counter |
-| `device_timestamp_ms` | `u32` | Teensy `millis()` timestamp |
+| `device_timestamp_ms` | `u32` | Device timestamp in milliseconds |
+| `device_timestamp_us` | `u32` | Device timestamp in microseconds from Teensy `micros()` |
 | `trial` | `u16` | Current trial index |
 | `mouse_reports` | `u16` | Number of original mouse reports aggregated into this packet |
 | `raw_dx`, `raw_dy` | `i32`, `i32` | Original mouse deltas from the dongle |
