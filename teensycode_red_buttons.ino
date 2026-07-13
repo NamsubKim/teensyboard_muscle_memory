@@ -26,6 +26,9 @@ const int ENCODER_COUNTS_PER_STEP = 4;
 const unsigned long DEBOUNCE_MS = 40;
 const int SERIAL_LINE_MAX = 160;
 #define SERIAL_DEBUG_RED_BUTTON_RAW 1
+#define SERIAL_MOUSE_TELEMETRY 1
+const unsigned long MOUSE_TELEMETRY_INTERVAL_MS = 50;
+const int MOUSE_TELEMETRY_MIN_WRITE_SPACE = 64;
 
 const uint16_t BOARD_BUTTON_LEFT = 0x0001;
 const uint16_t BOARD_BUTTON_RIGHT = 0x0002;
@@ -60,6 +63,16 @@ long lastKnobEncoderPos = 0;
 uint32_t telemetryCounter = 0;
 uint16_t boardButtons = 0;
 uint16_t boundaryFlags = 0;
+
+long pendingRawDx = 0;
+long pendingRawDy = 0;
+long pendingOutDx = 0;
+long pendingOutDy = 0;
+int pendingWheel = 0;
+int pendingWheelH = 0;
+uint8_t pendingMouseButtons = 0;
+uint16_t pendingMouseReports = 0;
+unsigned long lastMouseTelemetryMs = 0;
 
 bool lastRedLeftReading = HIGH;
 bool lastRedRightReading = HIGH;
@@ -100,9 +113,21 @@ void clearRemainders() {
   rem_y = 0.0f;
 }
 
+void clearMouseTelemetry() {
+  pendingRawDx = 0;
+  pendingRawDy = 0;
+  pendingOutDx = 0;
+  pendingOutDy = 0;
+  pendingWheel = 0;
+  pendingWheelH = 0;
+  pendingMouseButtons = 0;
+  pendingMouseReports = 0;
+}
+
 void resetTrialState() {
   knobScale = 1.0f;
   clearRemainders();
+  clearMouseTelemetry();
   boundaryFlags = 0;
   knobEncoder.write(0);
   lastKnobEncoderPos = 0;
@@ -204,12 +229,15 @@ void printButtonDiagnostics(const char *reason) {
   Serial.println(boardButtons);
 }
 
-void printMouseTelemetry(int dx, int dy, int out_x, int out_y,
-                         int wheel, int wheelH, uint8_t mouseButtons) {
+void printMouseTelemetry(long dx, long dy, long out_x, long out_y,
+                         int wheel, int wheelH, uint8_t mouseButtons,
+                         uint16_t mouseReports) {
   Serial.print("MOUSE trial=");
   Serial.print(trialIndex);
   Serial.print(" counter=");
   Serial.print(telemetryCounter++);
+  Serial.print(" mouse_reports=");
+  Serial.print(mouseReports);
   Serial.print(" raw_dx=");
   Serial.print(dx);
   Serial.print(" raw_dy=");
@@ -242,6 +270,52 @@ void printMouseTelemetry(int dx, int dy, int out_x, int out_y,
   Serial.print(lastKnobEncoderPos);
   Serial.print(" boundary_flags=");
   Serial.println(boundaryFlags);
+}
+
+void flushMouseTelemetry(bool force) {
+#if SERIAL_MOUSE_TELEMETRY
+  if (pendingMouseReports == 0) {
+    return;
+  }
+
+  unsigned long now = millis();
+  if (!force && now - lastMouseTelemetryMs < MOUSE_TELEMETRY_INTERVAL_MS) {
+    return;
+  }
+
+  if (!force && Serial.availableForWrite() < MOUSE_TELEMETRY_MIN_WRITE_SPACE) {
+    return;
+  }
+
+  printMouseTelemetry(
+      pendingRawDx,
+      pendingRawDy,
+      pendingOutDx,
+      pendingOutDy,
+      pendingWheel,
+      pendingWheelH,
+      pendingMouseButtons,
+      pendingMouseReports);
+  clearMouseTelemetry();
+  lastMouseTelemetryMs = now;
+#endif
+}
+
+void queueMouseTelemetry(int dx, int dy, int out_x, int out_y,
+                         int wheel, int wheelH, uint8_t mouseButtons) {
+#if SERIAL_MOUSE_TELEMETRY
+  pendingRawDx += dx;
+  pendingRawDy += dy;
+  pendingOutDx += out_x;
+  pendingOutDy += out_y;
+  pendingWheel += wheel;
+  pendingWheelH += wheelH;
+  pendingMouseButtons = mouseButtons;
+  if (pendingMouseReports < 65535) {
+    pendingMouseReports++;
+  }
+  flushMouseTelemetry(false);
+#endif
 }
 
 void handleRedButton(int pin, const char *name, uint16_t bit,
@@ -412,6 +486,7 @@ void loop() {
   handleRedButton(RED_BUTTON_RIGHT_PIN, "RED_BUTTON_RIGHT", BOARD_BUTTON_RIGHT,
                   lastRedRightReading, stableRedRightState, lastRedRightChangeMs);
   handleEncoder();
+  flushMouseTelemetry(false);
 
   if (mouse1.available()) {
     int dx = mouse1.getMouseX();
@@ -440,7 +515,7 @@ void loop() {
     else Mouse.release(MOUSE_MIDDLE);
 
     Mouse.move(out_x, out_y, wheel);
-    printMouseTelemetry(dx, dy, out_x, out_y, wheel, wheelH, mouseButtons);
+    queueMouseTelemetry(dx, dy, out_x, out_y, wheel, wheelH, mouseButtons);
 
     mouse1.mouseDataClear();
   }

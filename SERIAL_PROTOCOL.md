@@ -41,7 +41,10 @@ to both `dx` and `dy`.
 
 ## Teensy To PC
 
-All lines are whitespace-separated `key=value` records.
+All lines are whitespace-separated `key=value` records. `EVENT` and `BUTTON_RAW`
+button rows are emitted immediately. `MOUSE` rows are aggregated and rate-limited
+to reduce USB Serial backlog; `mouse_reports` tells how many original mouse
+reports are included in the row.
 
 ```text
 READY firmware=teensy_serial_cpi protocol=1 left_pin=15 right_pin=17
@@ -52,7 +55,7 @@ EVENT name=RED_BUTTON_LEFT pin=15 state=PRESSED trial=1 board_buttons=1
 BUTTON_RAW name=RED_BUTTON_RIGHT pin=17 raw=LOW pressed=1
 BUTTONS reason=query left_pin=15 left_raw=HIGH left_stable=HIGH right_pin=17 right_raw=LOW right_stable=HIGH board_buttons=0
 STATE reason=trial_start trial=1 baseline_cpi=800 randomized_cpi=1200 ...
-MOUSE trial=1 raw_dx=4 raw_dy=-2 out_dx=6 out_dy=-3 knob_scale=0.80 ...
+MOUSE trial=1 mouse_reports=8 raw_dx=4 raw_dy=-2 out_dx=6 out_dy=-3 knob_scale=0.80 ...
 ```
 
 Button bits:

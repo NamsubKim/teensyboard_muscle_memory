@@ -11,6 +11,10 @@ wireless mouse -> mouse dongle -> Teensy USB host -> PC
 It forwards mouse movement to the PC as USB Mouse HID after applying a CPI scale.
 Experiment control and telemetry are sent over USB Serial.
 
+Mouse telemetry on USB Serial is aggregated and rate-limited so red-button
+events are not delayed behind a flood of mouse rows. The PC still receives mouse
+movement immediately through Mouse HID.
+
 ## Files
 
 | File | Purpose |
