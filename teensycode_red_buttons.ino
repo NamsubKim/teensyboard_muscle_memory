@@ -28,6 +28,7 @@ const int SERIAL_LINE_MAX = 160;
 #define SERIAL_DEBUG_RED_BUTTON_RAW 1
 #define SERIAL_MOUSE_TELEMETRY 0
 #define SERIAL_MOUSE_BINARY_TELEMETRY 1
+#define SERIAL_MOUSE_IDLE_TELEMETRY 1
 const unsigned long MOUSE_TELEMETRY_INTERVAL_US = 2000;
 const int MOUSE_TELEMETRY_MIN_WRITE_SPACE = 64;
 const uint8_t BINARY_MAGIC_0 = 0xA5;
@@ -77,6 +78,7 @@ long pendingOutDy = 0;
 int pendingWheel = 0;
 int pendingWheelH = 0;
 uint8_t pendingMouseButtons = 0;
+uint8_t lastMouseButtons = 0;
 uint16_t pendingMouseReports = 0;
 unsigned long lastMouseTelemetryUs = 0;
 
@@ -354,7 +356,13 @@ void sendBinaryMouseTelemetry(long dx, long dy, long out_x, long out_y,
 
 void flushMouseTelemetry(bool force) {
 #if SERIAL_MOUSE_TELEMETRY || SERIAL_MOUSE_BINARY_TELEMETRY
-  if (pendingMouseReports == 0) {
+  bool hasMouseReports = pendingMouseReports > 0;
+#if SERIAL_MOUSE_IDLE_TELEMETRY
+  bool shouldSendIdleTelemetry = trialIndex > 0;
+#else
+  bool shouldSendIdleTelemetry = false;
+#endif
+  if (!hasMouseReports && !shouldSendIdleTelemetry) {
     return;
   }
 
@@ -367,6 +375,8 @@ void flushMouseTelemetry(bool force) {
     return;
   }
 
+  uint8_t reportMouseButtons = hasMouseReports ? pendingMouseButtons : lastMouseButtons;
+
 #if SERIAL_MOUSE_BINARY_TELEMETRY
   sendBinaryMouseTelemetry(
       pendingRawDx,
@@ -375,7 +385,7 @@ void flushMouseTelemetry(bool force) {
       pendingOutDy,
       pendingWheel,
       pendingWheelH,
-      pendingMouseButtons,
+      reportMouseButtons,
       pendingMouseReports);
 #else
   printMouseTelemetry(
@@ -385,7 +395,7 @@ void flushMouseTelemetry(bool force) {
       pendingOutDy,
       pendingWheel,
       pendingWheelH,
-      pendingMouseButtons,
+      reportMouseButtons,
       pendingMouseReports);
 #endif
   clearMouseTelemetry();
@@ -403,6 +413,7 @@ void queueMouseTelemetry(int dx, int dy, int out_x, int out_y,
   pendingWheel += wheel;
   pendingWheelH += wheelH;
   pendingMouseButtons = mouseButtons;
+  lastMouseButtons = mouseButtons;
   if (pendingMouseReports < 65535) {
     pendingMouseReports++;
   }
@@ -578,7 +589,6 @@ void loop() {
   handleRedButton(RED_BUTTON_RIGHT_PIN, "RED_BUTTON_RIGHT", BOARD_BUTTON_RIGHT,
                   lastRedRightReading, stableRedRightState, lastRedRightChangeMs);
   handleEncoder();
-  flushMouseTelemetry(false);
 
   if (mouse1.available()) {
     int dx = mouse1.getMouseX();
@@ -611,4 +621,6 @@ void loop() {
 
     mouse1.mouseDataClear();
   }
+
+  flushMouseTelemetry(false);
 }

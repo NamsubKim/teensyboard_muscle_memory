@@ -89,7 +89,10 @@ Mouse payload layout:
 | `boundary_flags` | `u16` | Clamp flags |
 
 Binary mouse telemetry is rate-limited to 500 Hz (`2000 us`) and aggregates all
-mouse reports received since the previous packet.
+mouse reports received since the previous packet. During an active trial
+(`trial > 0`), the Teensy also sends idle packets at the same rate when no mouse
+report arrived. Idle packets have `mouse_reports=0`, zero movement deltas, and
+the current knob/effective CPI state.
 
 Button bits:
 

@@ -13,7 +13,9 @@ Experiment control and telemetry are sent over USB Serial.
 
 Button/control telemetry is sent as readable ASCII lines. Mouse trajectory
 telemetry is sent as compact binary packets at 500 Hz, aggregating all mouse
-reports received in each 2 ms window. The PC still receives mouse movement
+reports received in each 2 ms window. During an active trial, a packet is still
+sent every 2 ms even if no mouse report arrived; those idle packets have
+`mouse_reports=0` and zero movement deltas. The PC still receives mouse movement
 immediately through Mouse HID.
 
 ## Files
