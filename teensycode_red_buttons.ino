@@ -27,8 +27,14 @@ const unsigned long DEBOUNCE_MS = 40;
 const int SERIAL_LINE_MAX = 160;
 #define SERIAL_DEBUG_RED_BUTTON_RAW 1
 #define SERIAL_MOUSE_TELEMETRY 0
-const unsigned long MOUSE_TELEMETRY_INTERVAL_MS = 50;
+#define SERIAL_MOUSE_BINARY_TELEMETRY 1
+const unsigned long MOUSE_TELEMETRY_INTERVAL_US = 2000;
 const int MOUSE_TELEMETRY_MIN_WRITE_SPACE = 64;
+const uint8_t BINARY_MAGIC_0 = 0xA5;
+const uint8_t BINARY_MAGIC_1 = 0x5A;
+const uint8_t BINARY_PROTOCOL_VERSION = 1;
+const uint8_t BINARY_PACKET_MOUSE = 1;
+const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 54;
 
 const uint16_t BOARD_BUTTON_LEFT = 0x0001;
 const uint16_t BOARD_BUTTON_RIGHT = 0x0002;
@@ -72,7 +78,7 @@ int pendingWheel = 0;
 int pendingWheelH = 0;
 uint8_t pendingMouseButtons = 0;
 uint16_t pendingMouseReports = 0;
-unsigned long lastMouseTelemetryMs = 0;
+unsigned long lastMouseTelemetryUs = 0;
 
 bool lastRedLeftReading = HIGH;
 bool lastRedRightReading = HIGH;
@@ -272,14 +278,88 @@ void printMouseTelemetry(long dx, long dy, long out_x, long out_y,
   Serial.println(boundaryFlags);
 }
 
+int16_t scaleToQ1000(float value) {
+  float scaled = value * 1000.0f;
+  if (scaled > 32767.0f) scaled = 32767.0f;
+  if (scaled < -32768.0f) scaled = -32768.0f;
+  return (int16_t)(scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
+}
+
+void putU16(uint8_t *packet, int &index, uint16_t value) {
+  packet[index++] = (uint8_t)(value & 0xFF);
+  packet[index++] = (uint8_t)((value >> 8) & 0xFF);
+}
+
+void putI16(uint8_t *packet, int &index, int16_t value) {
+  putU16(packet, index, (uint16_t)value);
+}
+
+void putU32(uint8_t *packet, int &index, uint32_t value) {
+  packet[index++] = (uint8_t)(value & 0xFF);
+  packet[index++] = (uint8_t)((value >> 8) & 0xFF);
+  packet[index++] = (uint8_t)((value >> 16) & 0xFF);
+  packet[index++] = (uint8_t)((value >> 24) & 0xFF);
+}
+
+void putI32(uint8_t *packet, int &index, int32_t value) {
+  putU32(packet, index, (uint32_t)value);
+}
+
+uint8_t binaryChecksum(const uint8_t *packet, int lengthWithoutChecksum) {
+  uint8_t sum = 0;
+  for (int i = 2; i < lengthWithoutChecksum; i++) {
+    sum = (uint8_t)(sum + packet[i]);
+  }
+  return sum;
+}
+
+void sendBinaryMouseTelemetry(long dx, long dy, long out_x, long out_y,
+                              int wheel, int wheelH, uint8_t mouseButtons,
+                              uint16_t mouseReports) {
+  const int packetLen = 2 + 3 + BINARY_MOUSE_PAYLOAD_LEN + 1;
+  uint8_t packet[packetLen];
+  int index = 0;
+
+  packet[index++] = BINARY_MAGIC_0;
+  packet[index++] = BINARY_MAGIC_1;
+  packet[index++] = BINARY_PROTOCOL_VERSION;
+  packet[index++] = BINARY_PACKET_MOUSE;
+  packet[index++] = BINARY_MOUSE_PAYLOAD_LEN;
+
+  putU32(packet, index, telemetryCounter++);
+  putU32(packet, index, millis());
+  putU16(packet, index, trialIndex);
+  putU16(packet, index, mouseReports);
+  putI32(packet, index, (int32_t)dx);
+  putI32(packet, index, (int32_t)dy);
+  putI32(packet, index, (int32_t)out_x);
+  putI32(packet, index, (int32_t)out_y);
+  putI16(packet, index, (int16_t)wheel);
+  putI16(packet, index, (int16_t)wheelH);
+  putU16(packet, index, mouseButtons);
+  putU16(packet, index, boardButtons);
+  putI16(packet, index, scaleToQ1000(startScale));
+  putI16(packet, index, scaleToQ1000(knobScale));
+  putI16(packet, index, scaleToQ1000(effectiveScale()));
+  putU16(packet, index, baselineCpi);
+  putU16(packet, index, randomizedCpi);
+  putU16(packet, index, effectiveCpi());
+  putI32(packet, index, (int32_t)lastKnobEncoderPos);
+  putU16(packet, index, boundaryFlags);
+
+  packet[index] = binaryChecksum(packet, index);
+  index++;
+  Serial.write(packet, index);
+}
+
 void flushMouseTelemetry(bool force) {
-#if SERIAL_MOUSE_TELEMETRY
+#if SERIAL_MOUSE_TELEMETRY || SERIAL_MOUSE_BINARY_TELEMETRY
   if (pendingMouseReports == 0) {
     return;
   }
 
-  unsigned long now = millis();
-  if (!force && now - lastMouseTelemetryMs < MOUSE_TELEMETRY_INTERVAL_MS) {
+  unsigned long now = micros();
+  if (!force && now - lastMouseTelemetryUs < MOUSE_TELEMETRY_INTERVAL_US) {
     return;
   }
 
@@ -287,6 +367,17 @@ void flushMouseTelemetry(bool force) {
     return;
   }
 
+#if SERIAL_MOUSE_BINARY_TELEMETRY
+  sendBinaryMouseTelemetry(
+      pendingRawDx,
+      pendingRawDy,
+      pendingOutDx,
+      pendingOutDy,
+      pendingWheel,
+      pendingWheelH,
+      pendingMouseButtons,
+      pendingMouseReports);
+#else
   printMouseTelemetry(
       pendingRawDx,
       pendingRawDy,
@@ -296,14 +387,15 @@ void flushMouseTelemetry(bool force) {
       pendingWheelH,
       pendingMouseButtons,
       pendingMouseReports);
+#endif
   clearMouseTelemetry();
-  lastMouseTelemetryMs = now;
+  lastMouseTelemetryUs = now;
 #endif
 }
 
 void queueMouseTelemetry(int dx, int dy, int out_x, int out_y,
                          int wheel, int wheelH, uint8_t mouseButtons) {
-#if SERIAL_MOUSE_TELEMETRY
+#if SERIAL_MOUSE_TELEMETRY || SERIAL_MOUSE_BINARY_TELEMETRY
   pendingRawDx += dx;
   pendingRawDy += dy;
   pendingOutDx += out_x;
