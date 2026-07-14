@@ -162,6 +162,25 @@ void clearRemainders() {
   rem_y = 0.0f;
 }
 
+int consumeWholePixels(float &remainder, float scaledDelta) {
+  float total = scaledDelta + remainder;
+  int whole = 0;
+
+  if (total >= 1.0f) {
+    whole = (int)floor(total);
+  } else if (total <= -1.0f) {
+    whole = (int)ceil(total);
+  }
+
+  remainder = total - whole;
+
+  if (remainder > -0.000001f && remainder < 0.000001f) {
+    remainder = 0.0f;
+  }
+
+  return whole;
+}
+
 void clearMouseTelemetry() {
   pendingRawDx = 0;
   pendingRawDy = 0;
@@ -793,14 +812,8 @@ void loop() {
     uint8_t mouseButtons = mouse1.getButtons();
 
     float scale = effectiveScale();
-    float sx = dx * scale + rem_x;
-    float sy = dy * scale + rem_y;
-
-    int out_x = (int)sx;
-    int out_y = (int)sy;
-
-    rem_x = sx - out_x;
-    rem_y = sy - out_y;
+    int out_x = consumeWholePixels(rem_x, dx * scale);
+    int out_y = consumeWholePixels(rem_y, dy * scale);
 
     if (mouseButtons & 1) Mouse.press(MOUSE_LEFT);
     else Mouse.release(MOUSE_LEFT);
