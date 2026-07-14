@@ -69,7 +69,8 @@ right-knob tick changes it by 4, independent of the randomized gain.
 6. Teensy resets both knob step counters to zero.
 7. User adjusts the coarse/fine knobs until the sensitivity feels normal.
 8. User presses the left red button to submit the trial.
-9. Python logs the selected state and starts the next trial.
+9. Python logs the selected state and starts the next trial until the
+   time-limited session expires.
 10. When the session aborts or completes, Python sends `BLIND,0` and
     `TRIAL,0,800,800,1.0,...` to return the device to 800 CPI.
 
