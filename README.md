@@ -63,13 +63,15 @@ right-knob tick changes it by 4, independent of the randomized gain.
 
 1. Python opens the Teensy serial COM port and sends `PING`.
 2. Teensy replies with `READY firmware=teensy_serial_cpi ...`.
-3. User presses the right red button to start the experiment.
+3. User double-presses the right red button to start the experiment.
 4. Python sends `BLIND,1`, so the OLED hides CPI and knob values.
 5. Python sends a `TRIAL,...` command with randomized CPI settings.
 6. Teensy resets both knob step counters to zero.
 7. User adjusts the coarse/fine knobs until the sensitivity feels normal.
 8. User presses the left red button to submit the trial.
 9. Python logs the selected state and starts the next trial.
+10. When the session aborts or completes, Python sends `BLIND,0` and
+    `TRIAL,0,800,800,1.0,...` to return the device to 800 CPI.
 
 ## Quick Serial Checks
 
