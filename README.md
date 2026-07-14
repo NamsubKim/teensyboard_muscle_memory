@@ -58,6 +58,8 @@ Python experiment manager will not see a COM port.
 Both knobs change the same effective CPI for `dx` and `dy`. The firmware adapts
 the gain so that one left-knob tick changes effective CPI by 40 and one
 right-knob tick changes it by 4, independent of the randomized gain.
+Python sends absolute effective CPI limits with each trial; the default reachable
+range is 100 to 6400 CPI regardless of the randomized CPI.
 
 ## Experiment Flow
 

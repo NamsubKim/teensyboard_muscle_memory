@@ -27,7 +27,7 @@ const int COARSE_ENCODER_SIGN = 1;
 const int FINE_ENCODER_SIGN = 1;
 
 const unsigned long DEBOUNCE_MS = 40;
-const int SERIAL_LINE_MAX = 160;
+const int SERIAL_LINE_MAX = 192;
 #define SERIAL_DEBUG_RED_BUTTON_RAW 1
 #define SERIAL_MOUSE_TELEMETRY 0
 #define SERIAL_MOUSE_BINARY_TELEMETRY 1
@@ -67,6 +67,8 @@ float startScale = 1.0f;
 float knobScale = 1.0f;
 float knobScaleMin = DEFAULT_KNOB_SCALE_MIN;
 float knobScaleMax = DEFAULT_KNOB_SCALE_MAX;
+uint16_t effectiveCpiMinLimit = 100;
+uint16_t effectiveCpiMaxLimit = 6400;
 bool displayBlindMode = false;
 
 float rem_x = 0.0f;
@@ -106,21 +108,34 @@ long effectiveCpiForSteps(int16_t coarse, int16_t fine) {
 }
 
 long minEffectiveCpi() {
-  return (long)((float)randomizedCpi * knobScaleMin + 0.999f);
+  return (long)effectiveCpiMinLimit;
 }
 
 long maxEffectiveCpi() {
-  return (long)((float)randomizedCpi * knobScaleMax);
+  return (long)effectiveCpiMaxLimit;
+}
+
+long clampEffectiveCpi(long value) {
+  long minValue = minEffectiveCpi();
+  long maxValue = maxEffectiveCpi();
+  if (value < minValue) return minValue;
+  if (value > maxValue) return maxValue;
+  return value;
+}
+
+long currentEffectiveCpiValue() {
+  return clampEffectiveCpi(effectiveCpiForSteps(coarseSteps, fineSteps));
 }
 
 void refreshKnobState() {
-  long value = effectiveCpiForSteps(coarseSteps, fineSteps);
+  long rawValue = effectiveCpiForSteps(coarseSteps, fineSteps);
+  long value = clampEffectiveCpi(rawValue);
   long minValue = minEffectiveCpi();
   long maxValue = maxEffectiveCpi();
 
   boundaryFlags = 0;
-  if (value <= minValue) boundaryFlags |= BOUNDARY_MIN;
-  if (value >= maxValue) boundaryFlags |= BOUNDARY_MAX;
+  if (rawValue <= minValue) boundaryFlags |= BOUNDARY_MIN;
+  if (rawValue >= maxValue) boundaryFlags |= BOUNDARY_MAX;
 
   knobCpiOffset = (int16_t)(value - (long)randomizedCpi);
   if (randomizedCpi > 0) {
@@ -132,11 +147,11 @@ void refreshKnobState() {
 
 float effectiveScale() {
   if (baselineCpi == 0) return 1.0f;
-  return (float)effectiveCpiForSteps(coarseSteps, fineSteps) / (float)baselineCpi;
+  return (float)currentEffectiveCpiValue() / (float)baselineCpi;
 }
 
 uint16_t effectiveCpi() {
-  long value = effectiveCpiForSteps(coarseSteps, fineSteps);
+  long value = currentEffectiveCpiValue();
   if (value < 0) value = 0;
   if (value > 65535L) value = 65535L;
   return (uint16_t)value;
@@ -232,6 +247,10 @@ void printState(const char *reason) {
   Serial.print(effectiveScale(), 6);
   Serial.print(" effective_cpi=");
   Serial.print(effectiveCpi());
+  Serial.print(" effective_cpi_min=");
+  Serial.print(effectiveCpiMinLimit);
+  Serial.print(" effective_cpi_max=");
+  Serial.print(effectiveCpiMaxLimit);
   Serial.print(" knob_cpi_offset=");
   Serial.print(knobCpiOffset);
   Serial.print(" coarse_steps=");
@@ -517,15 +536,16 @@ void handleRedButton(int pin, const char *name, uint16_t bit,
 bool applySingleKnobStep(int coarseDelta, int fineDelta) {
   int16_t candidateCoarse = coarseSteps + coarseDelta;
   int16_t candidateFine = fineSteps + fineDelta;
+  long currentCpi = effectiveCpiForSteps(coarseSteps, fineSteps);
   long candidateCpi = effectiveCpiForSteps(candidateCoarse, candidateFine);
   long minValue = minEffectiveCpi();
   long maxValue = maxEffectiveCpi();
 
-  if (candidateCpi < minValue) {
+  if (candidateCpi < minValue && currentCpi <= minValue && candidateCpi <= currentCpi) {
     boundaryFlags = BOUNDARY_MIN;
     return false;
   }
-  if (candidateCpi > maxValue) {
+  if (candidateCpi > maxValue && currentCpi >= maxValue && candidateCpi >= currentCpi) {
     boundaryFlags = BOUNDARY_MAX;
     return false;
   }
@@ -630,6 +650,25 @@ void processTrialCommand(char *line) {
   }
   float newKnobMax = atof(token);
 
+  uint16_t newEffectiveMin = (uint16_t)((float)newRandomizedCpi * newKnobMin + 0.999f);
+  uint16_t newEffectiveMax = (uint16_t)((float)newRandomizedCpi * newKnobMax);
+
+  token = strtok(NULL, ",");
+  if (token) {
+    long value = atol(token);
+    if (value < 1) value = 1;
+    if (value > 65535L) value = 65535L;
+    newEffectiveMin = (uint16_t)value;
+  }
+
+  token = strtok(NULL, ",");
+  if (token) {
+    long value = atol(token);
+    if (value < 1) value = 1;
+    if (value > 65535L) value = 65535L;
+    newEffectiveMax = (uint16_t)value;
+  }
+
   trialIndex = newTrialIndex;
   baselineCpi = newBaselineCpi;
   randomizedCpi = newRandomizedCpi;
@@ -638,6 +677,11 @@ void processTrialCommand(char *line) {
   knobScaleMax = newKnobMax;
   if (knobScaleMin < 0.01f) knobScaleMin = 0.01f;
   if (knobScaleMax < knobScaleMin) knobScaleMax = knobScaleMin;
+  if (newEffectiveMax < newEffectiveMin) newEffectiveMax = newEffectiveMin;
+  if (newEffectiveMin > randomizedCpi) newEffectiveMin = randomizedCpi;
+  if (newEffectiveMax < randomizedCpi) newEffectiveMax = randomizedCpi;
+  effectiveCpiMinLimit = newEffectiveMin;
+  effectiveCpiMaxLimit = newEffectiveMax;
 
   resetTrialState();
   drawDisplay();

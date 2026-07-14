@@ -31,13 +31,13 @@ values as feedback.
 Start or reset a trial:
 
 ```text
-TRIAL,<trial_index>,<baseline_cpi>,<randomized_cpi>,<start_scale>,<knob_min>,<knob_max>
+TRIAL,<trial_index>,<baseline_cpi>,<randomized_cpi>,<start_scale>,<knob_min>,<knob_max>[,<effective_min>,<effective_max>]
 ```
 
 Example:
 
 ```text
-TRIAL,1,800,1200,1.50000000,0.25000000,4.00000000
+TRIAL,1,800,1200,1.50000000,0.25000000,4.00000000,100,6400
 ```
 
 On `TRIAL`, Teensy resets both knobs, zeros movement remainders, and starts at:
@@ -47,6 +47,11 @@ randomized_gain = start_scale = randomized_cpi / baseline_cpi
 effective_cpi = randomized_cpi
 knob_scale = 1.0
 ```
+
+If `effective_min` and `effective_max` are present, they are absolute effective
+CPI limits. Python sends `100,6400` by default, so every trial has the same
+effective CPI range. Without those optional fields, older behavior is preserved:
+limits are computed from `randomized_cpi * knob_min/max`.
 
 The left knob is coarse and the right knob is fine. Knob steps are adaptive in
 CPI units:
