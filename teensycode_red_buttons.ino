@@ -18,10 +18,13 @@ const int AY_ENCODER_B_PIN = 10;
 const int RED_BUTTON_LEFT_PIN = 15;
 const int RED_BUTTON_RIGHT_PIN = 17;
 
-const float DEFAULT_KNOB_SCALE_MIN = 0.50f;
-const float DEFAULT_KNOB_SCALE_MAX = 2.00f;
-const float ENCODER_SCALE_STEP = 0.04f;
+const float DEFAULT_KNOB_SCALE_MIN = 0.25f;
+const float DEFAULT_KNOB_SCALE_MAX = 4.00f;
+const int COARSE_CPI_PER_STEP = 40;
+const int FINE_CPI_PER_STEP = 4;
 const int ENCODER_COUNTS_PER_STEP = 4;
+const int COARSE_ENCODER_SIGN = 1;
+const int FINE_ENCODER_SIGN = 1;
 
 const unsigned long DEBOUNCE_MS = 40;
 const int SERIAL_LINE_MAX = 160;
@@ -35,7 +38,7 @@ const uint8_t BINARY_MAGIC_0 = 0xA5;
 const uint8_t BINARY_MAGIC_1 = 0x5A;
 const uint8_t BINARY_PROTOCOL_VERSION = 1;
 const uint8_t BINARY_PACKET_MOUSE = 1;
-const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 58;
+const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 68;
 
 const uint16_t BOARD_BUTTON_LEFT = 0x0001;
 const uint16_t BOARD_BUTTON_RIGHT = 0x0002;
@@ -54,7 +57,8 @@ USBHIDParser hid5(myusb);
 
 MouseController mouse1(myusb);
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
-Encoder knobEncoder(AY_ENCODER_A_PIN, AY_ENCODER_B_PIN);
+Encoder coarseEncoder(AY_ENCODER_A_PIN, AY_ENCODER_B_PIN);
+Encoder fineEncoder(AX_ENCODER_A_PIN, AX_ENCODER_B_PIN);
 
 uint16_t trialIndex = 0;
 uint16_t baselineCpi = 800;
@@ -66,7 +70,11 @@ float knobScaleMax = DEFAULT_KNOB_SCALE_MAX;
 
 float rem_x = 0.0f;
 float rem_y = 0.0f;
-long lastKnobEncoderPos = 0;
+long lastCoarseEncoderPos = 0;
+long lastFineEncoderPos = 0;
+int16_t coarseSteps = 0;
+int16_t fineSteps = 0;
+int16_t knobCpiOffset = 0;
 uint32_t telemetryCounter = 0;
 uint16_t boardButtons = 0;
 uint16_t boundaryFlags = 0;
@@ -92,28 +100,45 @@ unsigned long lastRedRightChangeMs = 0;
 char serialLine[SERIAL_LINE_MAX];
 int serialLineLen = 0;
 
+long effectiveCpiForSteps(int16_t coarse, int16_t fine) {
+  return (long)randomizedCpi + (long)coarse * COARSE_CPI_PER_STEP + (long)fine * FINE_CPI_PER_STEP;
+}
+
+long minEffectiveCpi() {
+  return (long)((float)randomizedCpi * knobScaleMin + 0.999f);
+}
+
+long maxEffectiveCpi() {
+  return (long)((float)randomizedCpi * knobScaleMax);
+}
+
+void refreshKnobState() {
+  long value = effectiveCpiForSteps(coarseSteps, fineSteps);
+  long minValue = minEffectiveCpi();
+  long maxValue = maxEffectiveCpi();
+
+  boundaryFlags = 0;
+  if (value <= minValue) boundaryFlags |= BOUNDARY_MIN;
+  if (value >= maxValue) boundaryFlags |= BOUNDARY_MAX;
+
+  knobCpiOffset = (int16_t)(value - (long)randomizedCpi);
+  if (randomizedCpi > 0) {
+    knobScale = (float)value / (float)randomizedCpi;
+  } else {
+    knobScale = 1.0f;
+  }
+}
+
 float effectiveScale() {
-  return startScale * knobScale;
+  if (baselineCpi == 0) return 1.0f;
+  return (float)effectiveCpiForSteps(coarseSteps, fineSteps) / (float)baselineCpi;
 }
 
 uint16_t effectiveCpi() {
-  float value = (float)baselineCpi * effectiveScale();
-  if (value < 0.0f) value = 0.0f;
-  if (value > 65535.0f) value = 65535.0f;
-  return (uint16_t)(value + 0.5f);
-}
-
-float clampKnobScale(float value) {
-  boundaryFlags = 0;
-  if (value < knobScaleMin) {
-    value = knobScaleMin;
-    boundaryFlags |= BOUNDARY_MIN;
-  }
-  if (value > knobScaleMax) {
-    value = knobScaleMax;
-    boundaryFlags |= BOUNDARY_MAX;
-  }
-  return round(value * 100.0f) / 100.0f;
+  long value = effectiveCpiForSteps(coarseSteps, fineSteps);
+  if (value < 0) value = 0;
+  if (value > 65535L) value = 65535L;
+  return (uint16_t)value;
 }
 
 void clearRemainders() {
@@ -134,11 +159,17 @@ void clearMouseTelemetry() {
 
 void resetTrialState() {
   knobScale = 1.0f;
+  coarseSteps = 0;
+  fineSteps = 0;
+  knobCpiOffset = 0;
   clearRemainders();
   clearMouseTelemetry();
   boundaryFlags = 0;
-  knobEncoder.write(0);
-  lastKnobEncoderPos = 0;
+  coarseEncoder.write(0);
+  fineEncoder.write(0);
+  lastCoarseEncoderPos = 0;
+  lastFineEncoderPos = 0;
+  refreshKnobState();
 }
 
 void drawDisplay() {
@@ -150,12 +181,15 @@ void drawDisplay() {
   display.print("Trial ");
   display.print(trialIndex);
 
-  display.setCursor(72, 0);
-  display.print("Knob");
+  display.setCursor(64, 0);
+  display.print("C/F ");
+  display.print(coarseSteps);
+  display.print("/");
+  display.print(fineSteps);
 
   display.setTextSize(2);
   display.setCursor(0, 16);
-  display.print(knobScale, 2);
+  display.print(effectiveCpi());
 
   display.display();
 }
@@ -184,8 +218,16 @@ void printState(const char *reason) {
   Serial.print(effectiveScale(), 6);
   Serial.print(" effective_cpi=");
   Serial.print(effectiveCpi());
-  Serial.print(" knob_raw=");
-  Serial.print(lastKnobEncoderPos);
+  Serial.print(" knob_cpi_offset=");
+  Serial.print(knobCpiOffset);
+  Serial.print(" coarse_steps=");
+  Serial.print(coarseSteps);
+  Serial.print(" fine_steps=");
+  Serial.print(fineSteps);
+  Serial.print(" coarse_raw=");
+  Serial.print(lastCoarseEncoderPos);
+  Serial.print(" fine_raw=");
+  Serial.print(lastFineEncoderPos);
   Serial.print(" board_buttons=");
   Serial.print(boardButtons);
   Serial.print(" boundary_flags=");
@@ -274,8 +316,16 @@ void printMouseTelemetry(long dx, long dy, long out_x, long out_y,
   Serial.print(wheel);
   Serial.print(" wheel_h=");
   Serial.print(wheelH);
-  Serial.print(" knob_raw=");
-  Serial.print(lastKnobEncoderPos);
+  Serial.print(" knob_cpi_offset=");
+  Serial.print(knobCpiOffset);
+  Serial.print(" coarse_steps=");
+  Serial.print(coarseSteps);
+  Serial.print(" fine_steps=");
+  Serial.print(fineSteps);
+  Serial.print(" coarse_raw=");
+  Serial.print(lastCoarseEncoderPos);
+  Serial.print(" fine_raw=");
+  Serial.print(lastFineEncoderPos);
   Serial.print(" boundary_flags=");
   Serial.println(boundaryFlags);
 }
@@ -348,7 +398,11 @@ void sendBinaryMouseTelemetry(long dx, long dy, long out_x, long out_y,
   putU16(packet, index, baselineCpi);
   putU16(packet, index, randomizedCpi);
   putU16(packet, index, effectiveCpi());
-  putI32(packet, index, (int32_t)lastKnobEncoderPos);
+  putI16(packet, index, coarseSteps);
+  putI16(packet, index, fineSteps);
+  putI16(packet, index, knobCpiOffset);
+  putI32(packet, index, (int32_t)lastCoarseEncoderPos);
+  putI32(packet, index, (int32_t)lastFineEncoderPos);
   putU16(packet, index, boundaryFlags);
 
   packet[index] = binaryChecksum(packet, index);
@@ -444,15 +498,72 @@ void handleRedButton(int pin, const char *name, uint16_t bit,
   }
 }
 
-void handleEncoder() {
-  long pos = knobEncoder.read();
-  long delta = pos - lastKnobEncoderPos;
+bool applySingleKnobStep(int coarseDelta, int fineDelta) {
+  int16_t candidateCoarse = coarseSteps + coarseDelta;
+  int16_t candidateFine = fineSteps + fineDelta;
+  long candidateCpi = effectiveCpiForSteps(candidateCoarse, candidateFine);
+  long minValue = minEffectiveCpi();
+  long maxValue = maxEffectiveCpi();
 
-  if (delta >= ENCODER_COUNTS_PER_STEP || delta <= -ENCODER_COUNTS_PER_STEP) {
-    int steps = delta / ENCODER_COUNTS_PER_STEP;
-    lastKnobEncoderPos += steps * ENCODER_COUNTS_PER_STEP;
+  if (candidateCpi < minValue) {
+    boundaryFlags = BOUNDARY_MIN;
+    return false;
+  }
+  if (candidateCpi > maxValue) {
+    boundaryFlags = BOUNDARY_MAX;
+    return false;
+  }
 
-    knobScale = clampKnobScale(knobScale + steps * ENCODER_SCALE_STEP);
+  coarseSteps = candidateCoarse;
+  fineSteps = candidateFine;
+  refreshKnobState();
+  return true;
+}
+
+bool applyKnobSteps(int coarseDelta, int fineDelta) {
+  bool changed = false;
+  bool attempted = false;
+
+  while (coarseDelta != 0) {
+    int step = coarseDelta > 0 ? 1 : -1;
+    attempted = true;
+    changed = applySingleKnobStep(step, 0) || changed;
+    coarseDelta -= step;
+  }
+
+  while (fineDelta != 0) {
+    int step = fineDelta > 0 ? 1 : -1;
+    attempted = true;
+    changed = applySingleKnobStep(0, step) || changed;
+    fineDelta -= step;
+  }
+
+  return changed || attempted;
+}
+
+bool handleEncoderDelta(Encoder &encoder, long &lastPos, int sign, bool coarse) {
+  long pos = encoder.read();
+  long delta = pos - lastPos;
+
+  if (delta < ENCODER_COUNTS_PER_STEP && delta > -ENCODER_COUNTS_PER_STEP) {
+    return false;
+  }
+
+  int rawSteps = delta / ENCODER_COUNTS_PER_STEP;
+  lastPos += rawSteps * ENCODER_COUNTS_PER_STEP;
+  int signedSteps = rawSteps * sign;
+
+  if (coarse) {
+    return applyKnobSteps(signedSteps, 0);
+  }
+  return applyKnobSteps(0, signedSteps);
+}
+
+void handleEncoders() {
+  bool coarseChanged = handleEncoderDelta(coarseEncoder, lastCoarseEncoderPos, COARSE_ENCODER_SIGN, true);
+  bool fineChanged = handleEncoderDelta(fineEncoder, lastFineEncoderPos, FINE_ENCODER_SIGN, false);
+
+  if (coarseChanged || fineChanged) {
     clearRemainders();
     drawDisplay();
     printState("knob");
@@ -590,7 +701,7 @@ void loop() {
                   lastRedLeftReading, stableRedLeftState, lastRedLeftChangeMs);
   handleRedButton(RED_BUTTON_RIGHT_PIN, "RED_BUTTON_RIGHT", BOARD_BUTTON_RIGHT,
                   lastRedRightReading, stableRedRightState, lastRedRightChangeMs);
-  handleEncoder();
+  handleEncoders();
 
   if (mouse1.available()) {
     int dx = mouse1.getMouseX();

@@ -10,6 +10,8 @@ wireless mouse -> mouse dongle -> Teensy USB host -> PC
 
 It forwards mouse movement to the PC as USB Mouse HID after applying a CPI scale.
 Experiment control and telemetry are sent over USB Serial.
+The physical mouse should be set to 800 CPI for the experiment; randomized
+trial gains and knob adjustments are applied in firmware.
 
 Button/control telemetry is sent as readable ASCII lines. Mouse trajectory
 telemetry is sent as compact binary packets at 500 Hz, aggregating all mouse
@@ -47,11 +49,15 @@ Python experiment manager will not see a COM port.
 |---|---:|---|
 | Left red button | 15 | Submit current trial |
 | Right red button | 17 | Start experiment |
-| Gain encoder A | 8 | Left knob encoder A |
-| Gain encoder B | 10 | Left knob encoder B |
+| Coarse encoder A | 8 | Left knob encoder A, 40 CPI per accepted tick |
+| Coarse encoder B | 10 | Left knob encoder B |
+| Fine encoder A | 3 | Right knob encoder A, 4 CPI per accepted tick |
+| Fine encoder B | 5 | Right knob encoder B |
 | OLED I2C | default Wire pins | Display current state |
 
-Only one knob changes the gain. The same gain is applied to both `dx` and `dy`.
+Both knobs change the same effective CPI for `dx` and `dy`. The firmware adapts
+the gain so that one left-knob tick changes effective CPI by 40 and one
+right-knob tick changes it by 4, independent of the randomized gain.
 
 ## Experiment Flow
 
@@ -59,8 +65,8 @@ Only one knob changes the gain. The same gain is applied to both `dx` and `dy`.
 2. Teensy replies with `READY firmware=teensy_serial_cpi ...`.
 3. User presses the right red button to start the experiment.
 4. Python sends a `TRIAL,...` command with randomized CPI settings.
-5. Teensy resets `knob_scale` to `1.0`.
-6. User adjusts the knob until the sensitivity feels normal.
+5. Teensy resets both knob step counters to zero.
+6. User adjusts the coarse/fine knobs until the sensitivity feels normal.
 7. User presses the left red button to submit the trial.
 8. Python logs the selected state and starts the next trial.
 
