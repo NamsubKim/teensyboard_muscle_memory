@@ -67,6 +67,7 @@ float startScale = 1.0f;
 float knobScale = 1.0f;
 float knobScaleMin = DEFAULT_KNOB_SCALE_MIN;
 float knobScaleMax = DEFAULT_KNOB_SCALE_MAX;
+bool displayBlindMode = false;
 
 float rem_x = 0.0f;
 float rem_y = 0.0f;
@@ -176,6 +177,19 @@ void drawDisplay() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
+  if (displayBlindMode) {
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.print("Trial");
+
+    display.setTextSize(3);
+    display.setCursor(0, 10);
+    display.print(trialIndex);
+
+    display.display();
+    return;
+  }
+
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.print("Trial ");
@@ -231,7 +245,9 @@ void printState(const char *reason) {
   Serial.print(" board_buttons=");
   Serial.print(boardButtons);
   Serial.print(" boundary_flags=");
-  Serial.println(boundaryFlags);
+  Serial.print(boundaryFlags);
+  Serial.print(" display_blind=");
+  Serial.println(displayBlindMode ? 1 : 0);
 }
 
 void printButtonEvent(const char *name, int pin, bool pressed) {
@@ -631,6 +647,23 @@ void processTrialCommand(char *line) {
   printState("trial_start");
 }
 
+void processBlindCommand(char *line) {
+  char *token = strtok(line, ",");
+  token = strtok(NULL, ",");
+  if (!token) {
+    Serial.println("ACK cmd=BLIND status=ERR reason=missing_enabled");
+    return;
+  }
+
+  int enabled = atoi(token);
+  displayBlindMode = enabled != 0;
+  drawDisplay();
+
+  Serial.print("ACK cmd=BLIND status=OK enabled=");
+  Serial.println(displayBlindMode ? 1 : 0);
+  printState("display");
+}
+
 void processSerialLine(char *line) {
   if (strcmp(line, "PING") == 0) {
     Serial.println("ACK cmd=PING status=OK");
@@ -645,6 +678,11 @@ void processSerialLine(char *line) {
 
   if (strncmp(line, "TRIAL,", 6) == 0) {
     processTrialCommand(line);
+    return;
+  }
+
+  if (strncmp(line, "BLIND,", 6) == 0) {
+    processBlindCommand(line);
     return;
   }
 

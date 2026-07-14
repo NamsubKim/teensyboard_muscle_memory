@@ -53,7 +53,7 @@ Python experiment manager will not see a COM port.
 | Coarse encoder B | 10 | Left knob encoder B |
 | Fine encoder A | 3 | Right knob encoder A, 4 CPI per accepted tick |
 | Fine encoder B | 5 | Right knob encoder B |
-| OLED I2C | default Wire pins | Display current state |
+| OLED I2C | default Wire pins | Display current state before the experiment; trial number only in blind mode |
 
 Both knobs change the same effective CPI for `dx` and `dy`. The firmware adapts
 the gain so that one left-knob tick changes effective CPI by 40 and one
@@ -64,11 +64,12 @@ right-knob tick changes it by 4, independent of the randomized gain.
 1. Python opens the Teensy serial COM port and sends `PING`.
 2. Teensy replies with `READY firmware=teensy_serial_cpi ...`.
 3. User presses the right red button to start the experiment.
-4. Python sends a `TRIAL,...` command with randomized CPI settings.
-5. Teensy resets both knob step counters to zero.
-6. User adjusts the coarse/fine knobs until the sensitivity feels normal.
-7. User presses the left red button to submit the trial.
-8. Python logs the selected state and starts the next trial.
+4. Python sends `BLIND,1`, so the OLED hides CPI and knob values.
+5. Python sends a `TRIAL,...` command with randomized CPI settings.
+6. Teensy resets both knob step counters to zero.
+7. User adjusts the coarse/fine knobs until the sensitivity feels normal.
+8. User presses the left red button to submit the trial.
+9. Python logs the selected state and starts the next trial.
 
 ## Quick Serial Checks
 

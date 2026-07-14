@@ -17,6 +17,17 @@ Read current red-button pin state for diagnosis:
 BUTTONS?
 ```
 
+Hide or show CPI/knob values on the OLED:
+
+```text
+BLIND,1
+BLIND,0
+```
+
+`BLIND,1` makes the OLED show only the current trial number. Python sends this
+when the experiment starts so the participant cannot use displayed CPI or knob
+values as feedback.
+
 Start or reset a trial:
 
 ```text
@@ -57,12 +68,13 @@ Control/status records are whitespace-separated `key=value` ASCII lines.
 ```text
 READY firmware=teensy_serial_cpi protocol=1 left_pin=15 right_pin=17
 ACK cmd=PING status=OK
+ACK cmd=BLIND status=OK enabled=1
 ACK cmd=TRIAL status=OK trial=1
 EVENT name=RED_BUTTON_RIGHT pin=17 state=PRESSED trial=0 board_buttons=2
 EVENT name=RED_BUTTON_LEFT pin=15 state=PRESSED trial=1 board_buttons=1
 BUTTON_RAW name=RED_BUTTON_RIGHT pin=17 raw=LOW pressed=1
 BUTTONS reason=query left_pin=15 left_raw=HIGH left_stable=HIGH right_pin=17 right_raw=LOW right_stable=HIGH board_buttons=0
-STATE reason=trial_start trial=1 baseline_cpi=800 randomized_cpi=1200 ...
+STATE reason=trial_start trial=1 baseline_cpi=800 randomized_cpi=1200 ... display_blind=1
 ```
 
 Mouse telemetry is sent as compact binary packets by default:
