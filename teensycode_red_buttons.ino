@@ -1,4 +1,4 @@
-#include <Wire.h>
+﻿#include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <Encoder.h>
@@ -181,6 +181,12 @@ int consumeWholePixels(float &remainder, float scaledDelta) {
   }
 
   return whole;
+}
+
+int16_t clampMouseDelta16(int value) {
+  if (value > 32767) return 32767;
+  if (value < -32768) return -32768;
+  return (int16_t)value;
 }
 
 void clearMouseTelemetry() {
@@ -897,6 +903,8 @@ void loop() {
     float scale = effectiveScale();
     int out_x = consumeWholePixels(rem_x, dx * scale);
     int out_y = consumeWholePixels(rem_y, dy * scale);
+    int16_t move_x = clampMouseDelta16(out_x);
+    int16_t move_y = clampMouseDelta16(out_y);
 
     if (mouseButtons & 1) Mouse.press(MOUSE_LEFT);
     else Mouse.release(MOUSE_LEFT);
@@ -913,8 +921,8 @@ void loop() {
     if (mouseButtons & 16) Mouse.press(MOUSE_FORWARD);
     else Mouse.release(MOUSE_FORWARD);
 
-    Mouse.move(out_x, out_y, wheel, wheelH);
-    queueMouseTelemetry(dx, dy, out_x, out_y, wheel, wheelH, mouseButtons);
+    Mouse.move(move_x, move_y, wheel, wheelH);
+    queueMouseTelemetry(dx, dy, move_x, move_y, wheel, wheelH, mouseButtons);
 
     mouse1.mouseDataClear();
   }
