@@ -10,8 +10,9 @@ wireless mouse -> mouse dongle -> Teensy USB host -> PC
 
 It forwards mouse movement to the PC as USB Mouse HID after applying a CPI scale.
 Experiment control and telemetry are sent over USB Serial.
-The physical mouse should be set to 800 CPI for the experiment; randomized
-trial gains and knob adjustments are applied in firmware.
+The experimental baseline remains 800 CPI. The physical mouse may run at its
+maximum CPI; Python sends `mouse_input_cpi`, and firmware scales it so an
+effective CPI of 800 remains the baseline.
 
 Button/control telemetry is sent as readable ASCII lines. Mouse trajectory
 telemetry is sent as compact binary packets at 500 Hz, aggregating all mouse
@@ -64,10 +65,10 @@ range is 100 to 6400 CPI regardless of the randomized CPI.
 ## Experiment Flow
 
 1. Python opens the Teensy serial COM port and sends `PING`.
-2. Teensy replies with `READY firmware=teensy_serial_cpi ...`.
+2. Teensy replies with protocol-v2 `READY firmware=teensy_serial_cpi ...`.
 3. User double-presses the right red button to start the experiment.
 4. Python sends `BLIND,1`, so the OLED hides CPI and knob values.
-5. Python sends a `TRIAL,...` command with randomized CPI settings.
+5. Python sends a command-ID-bearing `TRIAL,...` command and waits for its exact ACK.
 6. Teensy resets both knob step counters to zero.
 7. User adjusts the coarse/fine knobs until the sensitivity feels normal.
 8. User presses the left red button to submit the trial.
@@ -86,7 +87,7 @@ Expected serial check:
 ```text
 PING
 ACK cmd=PING status=OK
-READY firmware=teensy_serial_cpi protocol=1 left_pin=15 right_pin=17
+READY firmware=teensy_serial_cpi protocol=2 binary_mouse_payload_len=80 left_pin=15 right_pin=17
 ```
 
 Button diagnostic command:

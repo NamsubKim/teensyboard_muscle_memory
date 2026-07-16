@@ -36,9 +36,9 @@ const unsigned long MOUSE_TELEMETRY_INTERVAL_US = 2000;
 const int MOUSE_TELEMETRY_MIN_WRITE_SPACE = 64;
 const uint8_t BINARY_MAGIC_0 = 0xA5;
 const uint8_t BINARY_MAGIC_1 = 0x5A;
-const uint8_t BINARY_PROTOCOL_VERSION = 1;
+const uint8_t BINARY_PROTOCOL_VERSION = 2;
 const uint8_t BINARY_PACKET_MOUSE = 1;
-const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 68;
+const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 80;
 
 const uint16_t BOARD_BUTTON_LEFT = 0x0001;
 const uint16_t BOARD_BUTTON_RIGHT = 0x0002;
@@ -62,6 +62,7 @@ Encoder fineEncoder(AX_ENCODER_A_PIN, AX_ENCODER_B_PIN);
 
 uint16_t trialIndex = 0;
 uint16_t baselineCpi = 800;
+uint16_t mouseInputCpi = 800;
 uint16_t randomizedCpi = 800;
 float startScale = 1.0f;
 float knobScale = 1.0f;
@@ -70,6 +71,7 @@ float knobScaleMax = DEFAULT_KNOB_SCALE_MAX;
 uint16_t effectiveCpiMinLimit = 100;
 uint16_t effectiveCpiMaxLimit = 6400;
 bool displayBlindMode = false;
+uint32_t lastAppliedCommandId = 0;
 
 float rem_x = 0.0f;
 float rem_y = 0.0f;
@@ -146,6 +148,11 @@ void refreshKnobState() {
 }
 
 float effectiveScale() {
+  if (mouseInputCpi == 0) return 1.0f;
+  return (float)currentEffectiveCpiValue() / (float)mouseInputCpi;
+}
+
+float baselineEffectiveScale() {
   if (baselineCpi == 0) return 1.0f;
   return (float)currentEffectiveCpiValue() / (float)baselineCpi;
 }
@@ -155,11 +162,6 @@ uint16_t effectiveCpi() {
   if (value < 0) value = 0;
   if (value > 65535L) value = 65535L;
   return (uint16_t)value;
-}
-
-void clearRemainders() {
-  rem_x = 0.0f;
-  rem_y = 0.0f;
 }
 
 int consumeWholePixels(float &remainder, float scaledDelta) {
@@ -197,8 +199,6 @@ void resetTrialState() {
   coarseSteps = 0;
   fineSteps = 0;
   knobCpiOffset = 0;
-  clearRemainders();
-  clearMouseTelemetry();
   boundaryFlags = 0;
   coarseEncoder.write(0);
   fineEncoder.write(0);
@@ -243,7 +243,11 @@ void drawDisplay() {
 }
 
 void printReady() {
-  Serial.print("READY firmware=teensy_serial_cpi protocol=1 left_pin=");
+  Serial.print("READY firmware=teensy_serial_cpi protocol=");
+  Serial.print(BINARY_PROTOCOL_VERSION);
+  Serial.print(" binary_mouse_payload_len=");
+  Serial.print(BINARY_MOUSE_PAYLOAD_LEN);
+  Serial.print(" left_pin=");
   Serial.print(RED_BUTTON_LEFT_PIN);
   Serial.print(" right_pin=");
   Serial.println(RED_BUTTON_RIGHT_PIN);
@@ -256,6 +260,8 @@ void printState(const char *reason) {
   Serial.print(trialIndex);
   Serial.print(" baseline_cpi=");
   Serial.print(baselineCpi);
+  Serial.print(" mouse_input_cpi=");
+  Serial.print(mouseInputCpi);
   Serial.print(" randomized_cpi=");
   Serial.print(randomizedCpi);
   Serial.print(" start_scale=");
@@ -264,6 +270,8 @@ void printState(const char *reason) {
   Serial.print(knobScale, 6);
   Serial.print(" effective_scale=");
   Serial.print(effectiveScale(), 6);
+  Serial.print(" baseline_effective_scale=");
+  Serial.print(baselineEffectiveScale(), 6);
   Serial.print(" effective_cpi=");
   Serial.print(effectiveCpi());
   Serial.print(" effective_cpi_min=");
@@ -285,7 +293,11 @@ void printState(const char *reason) {
   Serial.print(" boundary_flags=");
   Serial.print(boundaryFlags);
   Serial.print(" display_blind=");
-  Serial.println(displayBlindMode ? 1 : 0);
+  Serial.print(displayBlindMode ? 1 : 0);
+  Serial.print(" command_id=");
+  Serial.print(lastAppliedCommandId);
+  Serial.print(" device_timestamp_us=");
+  Serial.println(micros());
 }
 
 void printButtonEvent(const char *name, int pin, bool pressed) {
@@ -298,7 +310,33 @@ void printButtonEvent(const char *name, int pin, bool pressed) {
   Serial.print(" trial=");
   Serial.print(trialIndex);
   Serial.print(" board_buttons=");
-  Serial.println(boardButtons);
+  Serial.print(boardButtons);
+  Serial.print(" device_timestamp_us=");
+  Serial.print(micros());
+  Serial.print(" baseline_cpi=");
+  Serial.print(baselineCpi);
+  Serial.print(" mouse_input_cpi=");
+  Serial.print(mouseInputCpi);
+  Serial.print(" randomized_cpi=");
+  Serial.print(randomizedCpi);
+  Serial.print(" effective_cpi=");
+  Serial.print(effectiveCpi());
+  Serial.print(" knob_scale=");
+  Serial.print(knobScale, 6);
+  Serial.print(" effective_scale=");
+  Serial.print(effectiveScale(), 6);
+  Serial.print(" coarse_steps=");
+  Serial.print(coarseSteps);
+  Serial.print(" fine_steps=");
+  Serial.print(fineSteps);
+  Serial.print(" knob_cpi_offset=");
+  Serial.print(knobCpiOffset);
+  Serial.print(" boundary_flags=");
+  Serial.print(boundaryFlags);
+  Serial.print(" display_blind=");
+  Serial.print(displayBlindMode ? 1 : 0);
+  Serial.print(" command_id=");
+  Serial.println(lastAppliedCommandId);
 }
 
 void printButtonRawChange(const char *name, int pin, bool reading) {
@@ -356,8 +394,12 @@ void printMouseTelemetry(long dx, long dy, long out_x, long out_y,
   Serial.print(knobScale, 6);
   Serial.print(" effective_scale=");
   Serial.print(effectiveScale(), 6);
+  Serial.print(" baseline_effective_scale=");
+  Serial.print(baselineEffectiveScale(), 6);
   Serial.print(" baseline_cpi=");
   Serial.print(baselineCpi);
+  Serial.print(" mouse_input_cpi=");
+  Serial.print(mouseInputCpi);
   Serial.print(" randomized_cpi=");
   Serial.print(randomizedCpi);
   Serial.print(" effective_cpi=");
@@ -389,6 +431,13 @@ int16_t scaleToQ1000(float value) {
   if (scaled > 32767.0f) scaled = 32767.0f;
   if (scaled < -32768.0f) scaled = -32768.0f;
   return (int16_t)(scaled + (scaled >= 0.0f ? 0.5f : -0.5f));
+}
+
+int32_t scaleToQ1000000(float value) {
+  double scaled = (double)value * 1000000.0;
+  if (scaled > 2147483647.0) scaled = 2147483647.0;
+  if (scaled < -2147483648.0) scaled = -2147483648.0;
+  return (int32_t)(scaled + (scaled >= 0.0 ? 0.5 : -0.5));
 }
 
 void putU16(uint8_t *packet, int &index, uint16_t value) {
@@ -450,6 +499,7 @@ void sendBinaryMouseTelemetry(long dx, long dy, long out_x, long out_y,
   putI16(packet, index, scaleToQ1000(knobScale));
   putI16(packet, index, scaleToQ1000(effectiveScale()));
   putU16(packet, index, baselineCpi);
+  putU16(packet, index, mouseInputCpi);
   putU16(packet, index, randomizedCpi);
   putU16(packet, index, effectiveCpi());
   putI16(packet, index, coarseSteps);
@@ -458,6 +508,9 @@ void sendBinaryMouseTelemetry(long dx, long dy, long out_x, long out_y,
   putI32(packet, index, (int32_t)lastCoarseEncoderPos);
   putI32(packet, index, (int32_t)lastFineEncoderPos);
   putU16(packet, index, boundaryFlags);
+  putU16(packet, index, displayBlindMode ? 1 : 0);
+  putI32(packet, index, scaleToQ1000000(rem_x));
+  putI32(packet, index, scaleToQ1000000(rem_y));
 
   packet[index] = binaryChecksum(packet, index);
   index++;
@@ -596,31 +649,30 @@ bool applyKnobSteps(int coarseDelta, int fineDelta) {
   return changed || attempted;
 }
 
-bool handleEncoderDelta(Encoder &encoder, long &lastPos, int sign, bool coarse) {
+int readEncoderSteps(Encoder &encoder, long &lastPos, int sign) {
   long pos = encoder.read();
   long delta = pos - lastPos;
 
   if (delta < ENCODER_COUNTS_PER_STEP && delta > -ENCODER_COUNTS_PER_STEP) {
-    return false;
+    return 0;
   }
 
   int rawSteps = delta / ENCODER_COUNTS_PER_STEP;
   lastPos += rawSteps * ENCODER_COUNTS_PER_STEP;
-  int signedSteps = rawSteps * sign;
-
-  if (coarse) {
-    return applyKnobSteps(signedSteps, 0);
-  }
-  return applyKnobSteps(0, signedSteps);
+  return rawSteps * sign;
 }
 
 void handleEncoders() {
-  bool coarseChanged = handleEncoderDelta(coarseEncoder, lastCoarseEncoderPos, COARSE_ENCODER_SIGN, true);
-  bool fineChanged = handleEncoderDelta(fineEncoder, lastFineEncoderPos, FINE_ENCODER_SIGN, false);
+  int coarseDelta = readEncoderSteps(coarseEncoder, lastCoarseEncoderPos, COARSE_ENCODER_SIGN);
+  int fineDelta = readEncoderSteps(fineEncoder, lastFineEncoderPos, FINE_ENCODER_SIGN);
 
-  if (coarseChanged || fineChanged) {
-    clearRemainders();
-    drawDisplay();
+  if (coarseDelta != 0 || fineDelta != 0) {
+    // Finish the old-gain interval before changing the scale metadata.
+    flushMouseTelemetry(true);
+    applyKnobSteps(coarseDelta, fineDelta);
+    if (!displayBlindMode) {
+      drawDisplay();
+    }
     printState("knob");
   }
 }
@@ -671,6 +723,7 @@ void processTrialCommand(char *line) {
 
   uint16_t newEffectiveMin = (uint16_t)((float)newRandomizedCpi * newKnobMin + 0.999f);
   uint16_t newEffectiveMax = (uint16_t)((float)newRandomizedCpi * newKnobMax);
+  uint16_t newMouseInputCpi = newBaselineCpi;
 
   token = strtok(NULL, ",");
   if (token) {
@@ -688,8 +741,26 @@ void processTrialCommand(char *line) {
     newEffectiveMax = (uint16_t)value;
   }
 
+  token = strtok(NULL, ",");
+  if (token) {
+    long value = atol(token);
+    if (value < 1) value = 1;
+    if (value > 65535L) value = 65535L;
+    newMouseInputCpi = (uint16_t)value;
+  }
+
+  uint32_t commandId = 0;
+  token = strtok(NULL, ",");
+  if (token) {
+    commandId = (uint32_t)strtoul(token, NULL, 10);
+  }
+
+  // Do not let an aggregate collected under the old gain cross this boundary.
+  flushMouseTelemetry(true);
+
   trialIndex = newTrialIndex;
   baselineCpi = newBaselineCpi;
+  mouseInputCpi = newMouseInputCpi;
   randomizedCpi = newRandomizedCpi;
   startScale = newStartScale;
   knobScaleMin = newKnobMin;
@@ -701,11 +772,14 @@ void processTrialCommand(char *line) {
   if (newEffectiveMax < randomizedCpi) newEffectiveMax = randomizedCpi;
   effectiveCpiMinLimit = newEffectiveMin;
   effectiveCpiMaxLimit = newEffectiveMax;
+  lastAppliedCommandId = commandId;
 
   resetTrialState();
   drawDisplay();
 
-  Serial.print("ACK cmd=TRIAL status=OK trial=");
+  Serial.print("ACK cmd=TRIAL status=OK command_id=");
+  Serial.print(commandId);
+  Serial.print(" trial=");
   Serial.println(trialIndex);
   printState("trial_start");
 }
@@ -719,10 +793,19 @@ void processBlindCommand(char *line) {
   }
 
   int enabled = atoi(token);
-  displayBlindMode = enabled != 0;
-  drawDisplay();
+  token = strtok(NULL, ",");
+  uint32_t commandId = token ? (uint32_t)strtoul(token, NULL, 10) : 0;
+  bool newBlindMode = enabled != 0;
+  bool changed = displayBlindMode != newBlindMode;
+  displayBlindMode = newBlindMode;
+  lastAppliedCommandId = commandId;
+  if (changed) {
+    drawDisplay();
+  }
 
-  Serial.print("ACK cmd=BLIND status=OK enabled=");
+  Serial.print("ACK cmd=BLIND status=OK command_id=");
+  Serial.print(commandId);
+  Serial.print(" enabled=");
   Serial.println(displayBlindMode ? 1 : 0);
   printState("display");
 }
@@ -798,11 +881,11 @@ void loop() {
   myusb.Task();
   handleSerialInput();
 
+  handleEncoders();
   handleRedButton(RED_BUTTON_LEFT_PIN, "RED_BUTTON_LEFT", BOARD_BUTTON_LEFT,
                   lastRedLeftReading, stableRedLeftState, lastRedLeftChangeMs);
   handleRedButton(RED_BUTTON_RIGHT_PIN, "RED_BUTTON_RIGHT", BOARD_BUTTON_RIGHT,
                   lastRedRightReading, stableRedRightState, lastRedRightChangeMs);
-  handleEncoders();
 
   if (mouse1.available()) {
     int dx = mouse1.getMouseX();
@@ -824,7 +907,13 @@ void loop() {
     if (mouseButtons & 4) Mouse.press(MOUSE_MIDDLE);
     else Mouse.release(MOUSE_MIDDLE);
 
-    Mouse.move(out_x, out_y, wheel);
+    if (mouseButtons & 8) Mouse.press(MOUSE_BACK);
+    else Mouse.release(MOUSE_BACK);
+
+    if (mouseButtons & 16) Mouse.press(MOUSE_FORWARD);
+    else Mouse.release(MOUSE_FORWARD);
+
+    Mouse.move(out_x, out_y, wheel, wheelH);
     queueMouseTelemetry(dx, dy, out_x, out_y, wheel, wheelH, mouseButtons);
 
     mouse1.mouseDataClear();
