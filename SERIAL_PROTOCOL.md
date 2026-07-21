@@ -28,6 +28,19 @@ BLIND,0,<command_id>
 when the experiment starts so the participant cannot use displayed CPI or knob
 values as feedback.
 
+Pause or resume the current trial:
+
+```text
+PAUSE,1,<command_id>
+PAUSE,0,<command_id>
+```
+
+`PAUSE,1` keeps the current trial index, effective CPI, and mouse scaling but
+shows `PAUSED` on the OLED and discards encoder movement until `PAUSE,0` is
+acknowledged. Mouse HID forwarding and 500 Hz telemetry continue during the
+pause. Each successful ACK includes `device_timestamp_us` for a device-side
+pause boundary.
+
 Start or reset a trial:
 
 ```text
@@ -78,24 +91,25 @@ Control/status records are whitespace-separated `key=value` ASCII lines.
 `EVENT` and `BUTTON_RAW` button rows are emitted immediately.
 
 ```text
-READY firmware=teensy_serial_cpi protocol=2 binary_mouse_payload_len=80 left_pin=15 right_pin=17
+READY firmware=teensy_serial_cpi protocol=3 binary_mouse_payload_len=82 pause_command=1 left_pin=15 right_pin=17
 ACK cmd=PING status=OK
 ACK cmd=BLIND status=OK command_id=41 enabled=1
+ACK cmd=PAUSE status=OK command_id=43 enabled=1 device_timestamp_us=...
 ACK cmd=TRIAL status=OK command_id=42 trial=1
 EVENT name=RED_BUTTON_RIGHT pin=17 state=PRESSED trial=0 board_buttons=2 device_timestamp_us=...
 EVENT name=RED_BUTTON_LEFT pin=15 state=PRESSED trial=1 board_buttons=1 device_timestamp_us=... effective_cpi=...
 BUTTON_RAW name=RED_BUTTON_RIGHT pin=17 raw=LOW pressed=1
 BUTTONS reason=query left_pin=15 left_raw=HIGH left_stable=HIGH right_pin=17 right_raw=LOW right_stable=HIGH board_buttons=0
-STATE reason=trial_start trial=1 baseline_cpi=800 randomized_cpi=1200 ... display_blind=1
+STATE reason=trial_start trial=1 baseline_cpi=800 randomized_cpi=1200 ... display_blind=1 experiment_paused=0
 ```
 
 Mouse telemetry is sent as compact binary packets by default:
 
 ```text
 magic:       0xA5 0x5A
-version:     u8, currently 2
+version:     u8, currently 3
 type:        u8, 1 = mouse telemetry
-payload_len: u8, currently 80
+payload_len: u8, currently 82
 payload:     little-endian fixed layout below
 checksum:    u8, sum(version..payload) & 0xFF
 ```
@@ -128,6 +142,7 @@ Mouse payload layout:
 | `fine_raw` | `i32` | Raw fine encoder count |
 | `boundary_flags` | `u16` | Clamp flags |
 | `display_blind` | `u16` | `1` while OLED shows trial number only |
+| `experiment_paused` | `u16` | `1` while the experiment is paused and encoder changes are frozen |
 | `remainder_x_q1000000`, `remainder_y_q1000000` | `i32`, `i32` | Fractional movement accumulators times 1,000,000 |
 
 Binary mouse telemetry is rate-limited to 500 Hz (`2000 us`) and aggregates all
@@ -138,7 +153,7 @@ the current knob/effective CPI state.
 
 Before applying a knob or trial gain change, the firmware force-flushes any
 pending aggregate with its old metadata. Fractional remainders continue across
-gain and trial boundaries and are reported in every v2 packet, allowing the
+gain, pause, and trial boundaries and are reported in every v3 packet, allowing the
 scaling equation to be audited row by row.
 
 Button bits:
@@ -146,7 +161,7 @@ Button bits:
 | Bit | Meaning |
 |---:|---|
 | `0x0001` | left red button, submit current trial |
-| `0x0002` | right red button, start experiment |
+| `0x0002` | right red button, start/pause/resume/finish control input |
 
 Boundary flags:
 

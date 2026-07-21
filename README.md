@@ -49,7 +49,7 @@ Python experiment manager will not see a COM port.
 | Control | Pin | Role |
 |---|---:|---|
 | Left red button | 15 | Submit current trial |
-| Right red button | 17 | Start experiment |
+| Right red button | 17 | Python classifies double-press as start/pause/resume and triple-press as finish |
 | Coarse encoder A | 8 | Left knob encoder A, 40 CPI per accepted tick |
 | Coarse encoder B | 10 | Left knob encoder B |
 | Fine encoder A | 3 | Right knob encoder A, 4 CPI per accepted tick |
@@ -65,16 +65,18 @@ range is 100 to 6400 CPI regardless of the randomized CPI.
 ## Experiment Flow
 
 1. Python opens the Teensy serial COM port and sends `PING`.
-2. Teensy replies with protocol-v2 `READY firmware=teensy_serial_cpi ...`.
+2. Teensy replies with protocol-v3 `READY firmware=teensy_serial_cpi ...`.
 3. User double-presses the right red button to start the experiment.
 4. Python sends `BLIND,1`, so the OLED hides CPI and knob values.
 5. Python sends a command-ID-bearing `TRIAL,...` command and waits for its exact ACK.
 6. Teensy resets both knob step counters to zero.
 7. User adjusts the coarse/fine knobs until the sensitivity feels normal.
 8. User presses the left red button to submit the trial.
-9. Python logs the selected state and starts the next trial until the
-   time-limited session expires.
-10. When the session aborts or completes, Python sends `BLIND,0` and
+9. A right-button double-press pauses or resumes the same trial through the
+   acknowledged `PAUSE,1/0` command. The OLED shows `PAUSED`, encoder changes
+   are ignored, and 500 Hz telemetry continues during the pause.
+10. A right-button triple-press finishes the unlimited session.
+11. When the session aborts or completes, Python sends `BLIND,0` and
     `TRIAL,0,800,800,1.0,...` to return the device to 800 CPI.
 
 ## Quick Serial Checks
@@ -87,7 +89,7 @@ Expected serial check:
 ```text
 PING
 ACK cmd=PING status=OK
-READY firmware=teensy_serial_cpi protocol=2 binary_mouse_payload_len=80 left_pin=15 right_pin=17
+READY firmware=teensy_serial_cpi protocol=3 binary_mouse_payload_len=82 pause_command=1 left_pin=15 right_pin=17
 ```
 
 Button diagnostic command:

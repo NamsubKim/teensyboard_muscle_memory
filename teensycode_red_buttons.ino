@@ -36,9 +36,9 @@ const unsigned long MOUSE_TELEMETRY_INTERVAL_US = 2000;
 const int MOUSE_TELEMETRY_MIN_WRITE_SPACE = 64;
 const uint8_t BINARY_MAGIC_0 = 0xA5;
 const uint8_t BINARY_MAGIC_1 = 0x5A;
-const uint8_t BINARY_PROTOCOL_VERSION = 2;
+const uint8_t BINARY_PROTOCOL_VERSION = 3;
 const uint8_t BINARY_PACKET_MOUSE = 1;
-const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 80;
+const uint8_t BINARY_MOUSE_PAYLOAD_LEN = 82;
 
 const uint16_t BOARD_BUTTON_LEFT = 0x0001;
 const uint16_t BOARD_BUTTON_RIGHT = 0x0002;
@@ -71,6 +71,7 @@ float knobScaleMax = DEFAULT_KNOB_SCALE_MAX;
 uint16_t effectiveCpiMinLimit = 100;
 uint16_t effectiveCpiMaxLimit = 6400;
 bool displayBlindMode = false;
+bool experimentPaused = false;
 uint32_t lastAppliedCommandId = 0;
 
 float rem_x = 0.0f;
@@ -217,6 +218,20 @@ void drawDisplay() {
   display.clearDisplay();
   display.setTextColor(SSD1306_WHITE);
 
+  if (experimentPaused) {
+    display.setTextSize(2);
+    display.setCursor(0, 0);
+    display.print("PAUSED");
+
+    display.setTextSize(1);
+    display.setCursor(0, 22);
+    display.print("Trial ");
+    display.print(trialIndex);
+
+    display.display();
+    return;
+  }
+
   if (displayBlindMode) {
     display.setTextSize(1);
     display.setCursor(0, 0);
@@ -253,6 +268,7 @@ void printReady() {
   Serial.print(BINARY_PROTOCOL_VERSION);
   Serial.print(" binary_mouse_payload_len=");
   Serial.print(BINARY_MOUSE_PAYLOAD_LEN);
+  Serial.print(" pause_command=1");
   Serial.print(" left_pin=");
   Serial.print(RED_BUTTON_LEFT_PIN);
   Serial.print(" right_pin=");
@@ -300,6 +316,8 @@ void printState(const char *reason) {
   Serial.print(boundaryFlags);
   Serial.print(" display_blind=");
   Serial.print(displayBlindMode ? 1 : 0);
+  Serial.print(" experiment_paused=");
+  Serial.print(experimentPaused ? 1 : 0);
   Serial.print(" command_id=");
   Serial.print(lastAppliedCommandId);
   Serial.print(" device_timestamp_us=");
@@ -341,6 +359,8 @@ void printButtonEvent(const char *name, int pin, bool pressed) {
   Serial.print(boundaryFlags);
   Serial.print(" display_blind=");
   Serial.print(displayBlindMode ? 1 : 0);
+  Serial.print(" experiment_paused=");
+  Serial.print(experimentPaused ? 1 : 0);
   Serial.print(" command_id=");
   Serial.println(lastAppliedCommandId);
 }
@@ -429,7 +449,9 @@ void printMouseTelemetry(long dx, long dy, long out_x, long out_y,
   Serial.print(" fine_raw=");
   Serial.print(lastFineEncoderPos);
   Serial.print(" boundary_flags=");
-  Serial.println(boundaryFlags);
+  Serial.print(boundaryFlags);
+  Serial.print(" experiment_paused=");
+  Serial.println(experimentPaused ? 1 : 0);
 }
 
 int16_t scaleToQ1000(float value) {
@@ -515,6 +537,7 @@ void sendBinaryMouseTelemetry(long dx, long dy, long out_x, long out_y,
   putI32(packet, index, (int32_t)lastFineEncoderPos);
   putU16(packet, index, boundaryFlags);
   putU16(packet, index, displayBlindMode ? 1 : 0);
+  putU16(packet, index, experimentPaused ? 1 : 0);
   putI32(packet, index, scaleToQ1000000(rem_x));
   putI32(packet, index, scaleToQ1000000(rem_y));
 
@@ -669,6 +692,14 @@ int readEncoderSteps(Encoder &encoder, long &lastPos, int sign) {
 }
 
 void handleEncoders() {
+  if (experimentPaused) {
+    // Discard all encoder movement, including partial detents, so movement
+    // made during a pause cannot appear as a gain jump after resume.
+    lastCoarseEncoderPos = coarseEncoder.read();
+    lastFineEncoderPos = fineEncoder.read();
+    return;
+  }
+
   int coarseDelta = readEncoderSteps(coarseEncoder, lastCoarseEncoderPos, COARSE_ENCODER_SIGN);
   int fineDelta = readEncoderSteps(fineEncoder, lastFineEncoderPos, FINE_ENCODER_SIGN);
 
@@ -765,6 +796,7 @@ void processTrialCommand(char *line) {
   flushMouseTelemetry(true);
 
   trialIndex = newTrialIndex;
+  experimentPaused = false;
   baselineCpi = newBaselineCpi;
   mouseInputCpi = newMouseInputCpi;
   randomizedCpi = newRandomizedCpi;
@@ -816,6 +848,41 @@ void processBlindCommand(char *line) {
   printState("display");
 }
 
+void processPauseCommand(char *line) {
+  char *token = strtok(line, ",");
+  token = strtok(NULL, ",");
+  if (!token) {
+    Serial.println("ACK cmd=PAUSE status=ERR reason=missing_enabled");
+    return;
+  }
+
+  int enabled = atoi(token);
+  token = strtok(NULL, ",");
+  uint32_t commandId = token ? (uint32_t)strtoul(token, NULL, 10) : 0;
+  bool newPaused = enabled != 0;
+  if (newPaused && trialIndex == 0) {
+    Serial.print("ACK cmd=PAUSE status=ERR command_id=");
+    Serial.print(commandId);
+    Serial.println(" reason=no_active_trial");
+    return;
+  }
+
+  // Keep telemetry collected under the previous phase on the previous side
+  // of the pause boundary.
+  flushMouseTelemetry(true);
+  experimentPaused = newPaused;
+  lastAppliedCommandId = commandId;
+  drawDisplay();
+
+  Serial.print("ACK cmd=PAUSE status=OK command_id=");
+  Serial.print(commandId);
+  Serial.print(" enabled=");
+  Serial.print(experimentPaused ? 1 : 0);
+  Serial.print(" device_timestamp_us=");
+  Serial.println(micros());
+  printState(experimentPaused ? "pause" : "resume");
+}
+
 void processSerialLine(char *line) {
   if (strcmp(line, "PING") == 0) {
     Serial.println("ACK cmd=PING status=OK");
@@ -835,6 +902,11 @@ void processSerialLine(char *line) {
 
   if (strncmp(line, "BLIND,", 6) == 0) {
     processBlindCommand(line);
+    return;
+  }
+
+  if (strncmp(line, "PAUSE,", 6) == 0) {
+    processPauseCommand(line);
     return;
   }
 
